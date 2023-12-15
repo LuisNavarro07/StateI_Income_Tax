@@ -39,17 +39,41 @@ taxchanges_data <- tax_data %>%
   arrange(state, year) 
 
 # Table 1 and Figure 1. 
-taxchanges_year <- taxchanges_data %>% 
+taxchanges_rate <- taxchanges_data %>% 
+  filter(tax_policy != "No PIT Rate") %>% 
   ## sum all tax changes across years 
   group_by(year) %>% 
   summarize(`Average PIT Rate` = mean(taxrate, na.rm = TRUE), 
             `Number of Tax Changes` = sum(taxdum, na.rm = TRUE),
             `Number of Tax Increases` = sum(taxinc, na.rm = TRUE),
-            `Average Tax Increase` = mean(delta_tax_inc, na.rm = TRUE), 
-            `Number of Tax Decreases` = sum(taxdec, na.rm = TRUE),
-            `Average Tax Decrease` = mean(delta_tax_dec, na.rm = TRUE)) %>% 
+            `Number of Tax Decreases` = sum(taxdec, na.rm = TRUE)) %>% 
   mutate(`Cumulative Number of Tax Increases` = cumsum(`Number of Tax Increases`), 
          `Cumulative Number of Tax Decreases` = cumsum(`Number of Tax Decreases`))
+
+taxchanges_deltarate <- taxchanges_data %>% 
+  filter(tax_policy != "No PIT Rate") %>% 
+  ## Consider only state-year that observed tax changes
+  filter(delta_tax != 0) %>% 
+  ## sum all tax changes across years 
+  group_by(year) %>% 
+  summarize(`Average Tax Increase` = mean(delta_tax_inc, na.rm = TRUE), 
+            `Average Tax Decrease` = mean(delta_tax_dec, na.rm = TRUE))
+
+taxchanges_table <- taxchanges_rate %>% 
+  left_join(taxchanges_deltarate, by = "year", relationship = "one-to-one") 
+
+taxchanges_mean <- taxchanges_table %>% 
+  summarize(
+    `Average PIT Rate` = mean(`Average PIT Rate`, na.rm = TRUE),                 
+    `Number of Tax Changes` = sum(`Number of Tax Changes`, na.rm = TRUE),             
+    `Number of Tax Increases` = sum( `Number of Tax Increases`, na.rm = TRUE),          
+    `Number of Tax Decreases` = sum(`Number of Tax Decreases`, na.rm = TRUE),
+    `Average Tax Increase`  = mean(`Average Tax Increase`, na.rm = TRUE),              
+    `Average Tax Decrease` = mean( `Average Tax Decrease`, na.rm = TRUE)
+  ) 
+
+taxchanges_year <- taxchanges_table %>% 
+  bind_rows(taxchanges_mean) 
 
 ## Table 1. Tax Changes by Year 
 table1 <- taxchanges_year %>% 
@@ -57,9 +81,12 @@ table1 <- taxchanges_year %>%
          `Number of Tax Increases`, `Average Tax Increase`, 
          `Number of Tax Decreases`,  `Average Tax Decrease`) %>% 
   rename(Year = year) %>% 
-  mutate(`Average PIT Rate` = round(`Average PIT Rate`, 2), 
-         `Average Tax Increase` = round(`Average Tax Increase`, 2),
-         `Average Tax Decrease` = round(`Average Tax Decrease`, 2))
+  mutate(`Average PIT Rate` = ifelse(is.na(`Average PIT Rate`) == TRUE, round(0,2), round(`Average PIT Rate`, 2)), 
+         `Average Tax Increase` = ifelse(is.na(`Average Tax Increase`) == TRUE, round(0,2), round(`Average Tax Increase`, 2)),
+         `Average Tax Decrease` = ifelse(is.na(`Average Tax Decrease`) == TRUE, round(0,2), round(`Average Tax Decrease`, 2))) %>% 
+  mutate(Year = as.character(Year)) %>% 
+  mutate(Year = ifelse(is.na(Year) == TRUE, "2002-2023", Year))
+
 
 write_csv(x = table1, 
           file = paste(ao, "table1.csv", sep = ""))
@@ -67,6 +94,7 @@ write_csv(x = table1,
 #-------------------------------------------------------------------------------
 ## Figure 1: Tax Changes by Increases and Decreases
 graph1_counts <- taxchanges_year %>% 
+  drop_na(year) %>% 
   select(year, 
          `Number of Tax Increases`, 
          `Number of Tax Decreases`) %>% 
@@ -86,6 +114,7 @@ graph1_counts <- taxchanges_year %>%
   guides(color = guide_legend(nrow = 2, byrow = TRUE)) 
 
 graph1_cumulative <- taxchanges_year %>% 
+  drop_na(year) %>% 
   select(year, 
          `Cumulative Number of Tax Increases`, 
          `Cumulative Number of Tax Decreases`) %>% 
@@ -110,32 +139,76 @@ graph1 <- plot_grid(format_plot(graph1_counts) + scale_color_wsj() + scale_fill_
 cowplot::ggsave2(filename = paste(ao, "figure1.png", sep = ""), 
                  plot = graph1, 
                  width = 40, height = 20, units = "cm")
+
+# Graph Aux. Tax Rate Changes 
+graph_deltatax <- taxchanges_year %>% 
+  drop_na(year) %>% 
+  select(year, 
+         `Average Tax Increase`, 
+         `Average Tax Decrease`) %>% 
+  mutate(`Tax Increases` = abs(`Average Tax Increase`))%>% 
+  mutate(`Tax Decreases` = abs(`Average Tax Decrease`)) %>% 
+  select(-c(`Average Tax Increase`, `Average Tax Decrease`)) %>% 
+  gather(key = "variable", value = "taxchanges", -year) %>% 
+  ggplot(mapping = aes(x = year, y = taxchanges, color = variable, fill = variable, 
+                       shape = variable, linetype = variable)) + 
+  geom_rect(xmin = 2007, xmax = 2009, ymin = -Inf, ymax = Inf,
+            alpha = 0.5, fill = "lightblue1", inherit.aes = FALSE)+
+  geom_rect(xmin = 2020, xmax = 2022, ymin = -Inf, ymax = Inf,
+            alpha = 0.5, fill = "lightblue1", inherit.aes = FALSE)+
+  geom_line() + geom_point() + 
+  #geom_smooth(method = "lm", se = FALSE) + 
+  labs(x = "", y = "Percentage Points", title = "Panel C: Average Tax Changes") +
+  scale_x_continuous(breaks = 2002:2023) + scale_y_continuous(n.breaks = 10) +
+  guides(color = guide_legend(nrow = 2, byrow = TRUE)) 
+
+format_plot(graph_deltatax) + scale_color_wsj() + scale_fill_wsj()
 #-------------------------------------------------------------------------------
 # Table 2. Tax Changes by State 
-taxchanges_states <- taxchanges_data %>% 
+
+taxchanges_rate <- taxchanges_data %>% 
+  filter(tax_policy != "No PIT Rate") %>% 
   ## sum all tax changes across years 
   group_by(state) %>% 
   summarize(`Average PIT Rate` = mean(taxrate, na.rm = TRUE), 
             `Number of Tax Changes` = sum(taxdum, na.rm = TRUE),
             `Number of Tax Increases` = sum(taxinc, na.rm = TRUE),
-            `Average Tax Increase` = mean(delta_tax_inc, na.rm = TRUE), 
-            `Number of Tax Decreases` = sum(taxdec, na.rm = TRUE),
-            `Average Tax Decrease` = mean(delta_tax_dec, na.rm = TRUE)) 
+            `Number of Tax Decreases` = sum(taxdec, na.rm = TRUE)) %>% 
+  mutate(`Cumulative Number of Tax Increases` = cumsum(`Number of Tax Increases`), 
+         `Cumulative Number of Tax Decreases` = cumsum(`Number of Tax Decreases`))
 
-table2 <- taxchanges_states %>% 
+taxchanges_deltarate <- taxchanges_data %>% 
+  filter(tax_policy != "No PIT Rate") %>% 
+  ## Consider only state-year that observed tax changes
+  filter(delta_tax != 0) %>% 
+  ## sum all tax changes across years 
+  group_by(state) %>% 
+  summarize(`Average Tax Increase` = mean(delta_tax_inc, na.rm = TRUE), 
+            `Average Tax Decrease` = mean(delta_tax_dec, na.rm = TRUE))
+
+taxchanges_table <- taxchanges_rate %>% 
+  left_join(taxchanges_deltarate, by = "state", relationship = "one-to-one") 
+
+taxchanges_state <- taxchanges_table %>% 
+  bind_rows(taxchanges_mean) 
+
+## Table 1. Tax Changes by Year 
+table2 <- taxchanges_state %>% 
   select(state, `Average PIT Rate`, 
          `Number of Tax Increases`, `Average Tax Increase`, 
          `Number of Tax Decreases`,  `Average Tax Decrease`) %>% 
   rename(State = state) %>% 
-  mutate(`Average PIT Rate` = round(`Average PIT Rate`, 2), 
-         `Average Tax Increase` = round(`Average Tax Increase`, 2),
-         `Average Tax Decrease` = round(`Average Tax Decrease`, 2))
+  mutate(`Average PIT Rate` = ifelse(is.na(`Average PIT Rate`) == TRUE, round(0,2), round(`Average PIT Rate`, 2)), 
+         `Average Tax Increase` = ifelse(is.na(`Average Tax Increase`) == TRUE, round(0,2), round(`Average Tax Increase`, 2)),
+         `Average Tax Decrease` = ifelse(is.na(`Average Tax Decrease`) == TRUE, round(0,2), round(`Average Tax Decrease`, 2))) %>% 
+  mutate(State = ifelse(is.na(State) == TRUE, "2002-2023", State))
+
 
 write_csv(x = table2, 
           file = paste(ao, "table2.csv", sep = ""))
 #-------------------------------------------------------------------------------
 # Table 3. Number of States by Number of tax Change 
-table3 <- taxchanges_states %>% 
+table3 <- taxchanges_state %>% 
   select(state, `Number of Tax Changes`) %>% 
   rename(State = state) %>% 
   mutate_at(vars(`Number of Tax Changes`), as.integer) %>% 
@@ -201,7 +274,7 @@ taxplot <- function(data, main) {
     scale_shape_manual(values = 1:num_states) +
     scale_linetype_manual(values = 1:num_states) +
     labs(x = "Year", y = "Tax Rate", title = main) +
-    guides(color = guide_legend("state"), linetype = guide_legend("state"), shape = guide_legend("state"))+ 
+    guides(color = guide_legend("state", ncol = 4), linetype = guide_legend("state"), shape = guide_legend("state"))+ 
     scale_x_continuous(breaks = 2002:2023) + scale_y_continuous(n.breaks = 10)
   
   fplot <- format_plot(plot) + theme(legend.position = "top", legend.justification = "left") +
@@ -297,27 +370,44 @@ datamaps <- left_join(us_states, states_categories,
                       by = "fips") %>% 
             select(state, fips, tax_policy, tax_policy_seg, geometry, STUSPS)
 #-------------------------------------------------------------------------------
-# Draw the Maps 
+# Draw the Maps
+
+wong_colors <- c("#8A8A8A", "#E69F00", "#56B4E9", "#009E73", "#F0E442",  "#CC79A7", "#0072B2", "#D55E00")
+# Create a 5-color palette from the Wong colors (excluding the last two colors)
+wong_palette_5 <- wong_colors[1:5]
+# Create a 7-color palette from the Wong colors
+wong_palette_7 <- wong_colors[1:7]
+
 mapgroups1 <- datamaps %>% 
   ggplot(mapping = aes(fill = tax_policy)) + 
-  geom_sf(color = "black", lwd = 0.2, alpha = 0.4) +
+  geom_sf(color = "black", lwd = 0.2, alpha = 0.8) +
   geom_sf_text(mapping = aes(label = STUSPS), size = 2.5) + 
-  labs(title = "States by Type of Income Tax Policy") 
+  labs(title = "States by Type of Income Tax Policy") + guides(fill = guide_legend(ncol = 3)) + 
+  scale_fill_manual(values=wong_palette_5)
 
 mapgroups2 <- datamaps %>% 
   ggplot(mapping = aes(fill = tax_policy_seg)) + 
-  geom_sf(color = "black", lwd = 0.2, alpha = 0.4) +
+  geom_sf(color = "black", lwd = 0.2, alpha = 0.8) +
   geom_sf_text(mapping = aes(label = STUSPS), size = 2.5) + 
-  labs(title = "States by Type of Income Tax Policy")  
+  labs(title = "States by Type of Income Tax Policy") + 
+  guides(fill = guide_legend(ncol = 3)) + 
+  scale_fill_manual(values=wong_palette_7)
+
 
 
 cowplot::ggsave2(filename = paste(ao, "map1.png", sep = ""), 
-                 plot = format_map(mapgroups1) , 
+                 plot = format_map(mapgroups1), 
                  width = 40, height = 20, units = "cm")
 
 cowplot::ggsave2(filename = paste(ao, "map2.png", sep = ""), 
-                 plot = format_map(mapgroups2) , 
+                 plot = format_map(mapgroups2),
                  width = 40, height = 20, units = "cm")
+
+# -----------------------------------------------------------------------------
+# Tax Increasers and Tax Decreasers in 2008 and 2009
+table_great_recession <- taxchanges_data %>% 
+  filter(year == 2007 | year == 2008 | year == 2009) %>% 
+  filter(delta_tax != 0)
 
 # End Script 
 #------------------------------------------------------------------------------

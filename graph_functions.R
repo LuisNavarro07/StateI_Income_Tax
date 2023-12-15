@@ -21,6 +21,7 @@ format_plot <- function(plot){
   return(formatted_plot)
 }
 
+
 format_map <- function(map){
   formatted_map <- map + 
     theme_void()+
@@ -34,9 +35,7 @@ format_map <- function(map){
       plot.title = element_text(size = fontsize, face = "bold"), 
       plot.subtitle = element_text(size = fontsize-2, face = "italic"),
       strip.text = element_text(size=fontsize-2)
-    ) + 
-    scale_fill_colorblind() + 
-    guides(fill = guide_legend(ncol = 3))
+    ) 
   return(formatted_map)
 }
 
